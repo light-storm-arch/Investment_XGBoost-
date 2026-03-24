@@ -59,8 +59,12 @@ with col_btn:
 # Load data
 # ---------------------------------------------------------------------------
 
-store = get_model_store()
-results = get_predictions(store)
+try:
+    store = get_model_store()
+    results = get_predictions(store)
+except Exception as e:
+    st.error(f"Failed to load models or generate predictions: {e}")
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Prediction cards
@@ -76,6 +80,10 @@ def _render_comparison(comp_key: str):
     preds.sort(key=lambda r: ["1m", "3m", "6m", "12m"].index(r.horizon))
 
     st.subheader(f"{label} ({pair['a']} vs {pair['b']})")
+
+    if not preds:
+        st.warning(f"No predictions available for {label}. Model training may have failed — check logs.")
+        return
 
     cols = st.columns(len(preds))
     for col, p in zip(cols, preds):
