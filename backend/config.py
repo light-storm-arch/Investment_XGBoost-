@@ -1,11 +1,11 @@
 """Configuration constants for the Investment XGBoost app."""
 
 FUND_TICKERS = {
-    "value_growth": {"a": "VVIAX", "b": "VIGAX", "a_label": "Value (VVIAX)", "b_label": "Growth (VIGAX)"},
-    "us_intl": {"a": "VTSAX", "b": "VTIAX", "a_label": "US (VTSAX)", "b_label": "International (VTIAX)"},
+    "value_growth": {"a": "VTV", "b": "VUG", "a_label": "Value (VTV)", "b_label": "Growth (VUG)"},
+    "us_intl": {"a": "VTI", "b": "VXUS", "a_label": "US (VTI)", "b_label": "International (VXUS)"},
 }
 
-ALL_TICKERS = ["VVIAX", "VIGAX", "VTSAX", "VTIAX"]
+ALL_TICKERS = ["VTV", "VUG", "VTI", "VXUS"]
 
 COMPARISON_LABELS = {
     "value_growth": "Value vs Growth",
