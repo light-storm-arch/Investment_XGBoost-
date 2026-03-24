@@ -2,6 +2,7 @@
 
 import os
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -34,6 +35,25 @@ def _is_fresh(path: Path) -> bool:
     return datetime.now() - mtime < CACHE_MAX_AGE
 
 
+def _download_single_ticker(ticker: str, max_retries: int = 4) -> pd.Series:
+    """Download a single ticker with exponential backoff retries."""
+    for attempt in range(max_retries):
+        try:
+            raw = yf.download(ticker, start=DATA_START_DATE, auto_adjust=True, progress=False)
+            if raw.empty:
+                raise ValueError(f"Empty data for {ticker}")
+            if isinstance(raw.columns, pd.MultiIndex):
+                return raw["Close"][ticker]
+            return raw["Close"]
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** (attempt + 1)
+                logger.warning(f"Retry {attempt + 1}/{max_retries} for {ticker} after {wait}s: {e}")
+                time.sleep(wait)
+            else:
+                raise RuntimeError(f"Failed to download {ticker} after {max_retries} attempts: {e}")
+
+
 def fetch_fund_prices() -> pd.DataFrame:
     """Download adjusted close prices for all fund tickers, resampled to month-end."""
     cache = _cache_path("fund_prices")
@@ -42,13 +62,13 @@ def fetch_fund_prices() -> pd.DataFrame:
         return pd.read_parquet(cache)
 
     logger.info("Downloading fund prices from yfinance")
-    raw = yf.download(ALL_TICKERS, start=DATA_START_DATE, auto_adjust=True, progress=False)
+    series = {}
+    for ticker in ALL_TICKERS:
+        logger.info(f"Downloading {ticker}")
+        series[ticker] = _download_single_ticker(ticker)
+        time.sleep(1)  # brief pause between tickers to avoid rate limits
 
-    if isinstance(raw.columns, pd.MultiIndex):
-        prices = raw["Close"]
-    else:
-        prices = raw[["Close"]].copy()
-        prices.columns = ALL_TICKERS
+    prices = pd.DataFrame(series)
 
     # Resample to month-end using last valid price
     monthly = prices.resample("ME").last()
