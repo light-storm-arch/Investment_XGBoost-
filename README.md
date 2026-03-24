@@ -7,31 +7,41 @@ XGBoost-powered application that predicts relative outperformance between fund p
 
 Predictions are generated across 1, 3, 6, and 12-month horizons using macroeconomic indicators from FRED and historical fund price data.
 
-## Architecture
-
-- **Backend**: Python / FastAPI with XGBoost models, walk-forward validated
-- **Frontend**: React / Vite with Recharts visualizations
-
-## Setup
-
-### Backend
+## Quick Start (Streamlit)
 
 ```bash
-cd backend
 pip install -r requirements.txt
-cp ../.env.example ../.env  # Add your FRED API key
-uvicorn main:app --reload
+cp .env.example .env  # Add your FRED API key
+streamlit run app.py
 ```
 
-### Frontend
+## Deploy to Streamlit Cloud
+
+1. Push this repo to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io) and connect your repo
+3. Set `app.py` as the main file
+4. Add `FRED_API_KEY` in the Secrets dashboard
+
+## Architecture
+
+- **Streamlit app** (`app.py`): Single-file UI with predictions, charts, feature importance, and metrics
+- **Backend modules** (`backend/`): Data fetching, feature engineering, XGBoost training with walk-forward validation
+- **FastAPI option** (`backend/main.py`): REST API if you prefer a separate frontend
+- **React frontend** (`frontend/`): Alternative React/Vite UI that talks to the FastAPI backend
+
+## Alternative: FastAPI + React
 
 ```bash
+# Terminal 1 — Backend
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+
+# Terminal 2 — Frontend
 cd frontend
 npm install
 npm run dev
 ```
-
-The frontend proxies `/api` requests to the backend at `localhost:8000`.
 
 ## Environment Variables
 
@@ -39,7 +49,7 @@ The frontend proxies `/api` requests to the backend at `localhost:8000`.
 |----------|-------------|
 | `FRED_API_KEY` | API key from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) |
 
-## API Endpoints
+## API Endpoints (FastAPI mode)
 
 | Method | Path | Description |
 |--------|------|-------------|

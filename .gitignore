@@ -11,10 +11,14 @@ venv/
 
 # Environment
 .env
+.streamlit/secrets.toml
 
 # Node
 node_modules/
 frontend/dist/
+
+# Cache
+backend/.cache/
 
 # IDE
 .vscode/

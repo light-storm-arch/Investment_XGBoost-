@@ -66,8 +66,15 @@ def fetch_fred_data() -> pd.DataFrame:
         return pd.read_parquet(cache)
 
     api_key = os.getenv("FRED_API_KEY")
+    # Also check Streamlit secrets if available
     if not api_key:
-        raise RuntimeError("FRED_API_KEY environment variable is not set. See .env.example.")
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("FRED_API_KEY")
+        except Exception:
+            pass
+    if not api_key:
+        raise RuntimeError("FRED_API_KEY is not set. Set it in .env, environment, or Streamlit secrets.")
 
     fred = Fred(api_key=api_key)
     series_dict: dict[str, pd.Series] = {}
