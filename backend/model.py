@@ -197,6 +197,140 @@ def train_all_models(force_refresh: bool = False) -> dict:
     return store
 
 
+def _walk_forward_detail(X: pd.DataFrame, y: pd.Series, n_splits: int,
+                         min_train: int, xgb_params: dict | None = None) -> pd.DataFrame:
+    """Walk-forward validation returning per-row predictions with dates."""
+    params = xgb_params or XGBOOST_PARAMS
+    n = len(X)
+    if n < min_train + n_splits:
+        min_train = max(int(n * 0.6), 30)
+
+    test_size = n - min_train
+    step = max(test_size // n_splits, 1)
+
+    records = []
+    for i in range(n_splits):
+        split_point = min_train + i * step
+        if split_point >= n:
+            break
+        end_point = min(split_point + step, n)
+
+        X_train = X.iloc[:split_point]
+        y_train = y.iloc[:split_point]
+        X_test = X.iloc[split_point:end_point]
+        y_test = y.iloc[split_point:end_point]
+
+        if len(X_train) < 20 or len(X_test) == 0:
+            continue
+
+        X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, test_size=0.2, shuffle=False)
+        model = XGBRegressor(**params)
+        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+
+        preds = model.predict(X_test)
+        for date, pred, actual in zip(X_test.index, preds, y_test.values):
+            records.append({"date": date, "predicted": float(pred), "actual": float(actual)})
+
+    return pd.DataFrame(records)
+
+
+def train_custom_split(comparison_key: str, horizon_key: str, cutoff_date: str,
+                       xgb_params: dict | None = None) -> dict:
+    """Train on data before cutoff_date, test on data after. Returns detail dict."""
+    params = xgb_params or XGBOOST_PARAMS
+    combined = get_combined_dataset()
+    feat_df = build_features(combined, comparison_key)
+    feature_cols = get_feature_columns(feat_df)
+    target_col = f"fwd_spread_{horizon_key}"
+
+    if target_col not in feat_df.columns:
+        return {"error": "Target column not found"}
+
+    valid = feat_df[target_col].notna()
+    X = feat_df.loc[valid, feature_cols].copy()
+    y = feat_df.loc[valid, target_col].copy()
+
+    cutoff = pd.Timestamp(cutoff_date)
+    train_mask = X.index <= cutoff
+    test_mask = X.index > cutoff
+
+    X_train, y_train = X[train_mask], y[train_mask]
+    X_test, y_test = X[test_mask], y[test_mask]
+
+    if len(X_train) < 30:
+        return {"error": f"Only {len(X_train)} training samples before cutoff"}
+    if len(X_test) < 1:
+        return {"error": "No test samples after cutoff"}
+
+    # Train with early stopping using last 15% of training data as validation
+    split_idx = max(int(len(X_train) * 0.85), 20)
+    X_tr, X_val = X_train.iloc[:split_idx], X_train.iloc[split_idx:]
+    y_tr, y_val = y_train.iloc[:split_idx], y_train.iloc[split_idx:]
+
+    model = XGBRegressor(**params)
+    model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+
+    preds = model.predict(X_test)
+    preds_arr = np.array(preds)
+    actuals_arr = y_test.values
+
+    mae = float(np.mean(np.abs(preds_arr - actuals_arr)))
+    rmse = float(np.sqrt(np.mean((preds_arr - actuals_arr) ** 2)))
+    da = float(np.mean(np.sign(preds_arr) == np.sign(actuals_arr)))
+    ic = 0.0
+    if len(preds_arr) > 2:
+        ic_val, _ = spearmanr(preds_arr, actuals_arr)
+        ic = 0.0 if np.isnan(ic_val) else float(ic_val)
+
+    # Cumulative signal P&L: go long spread when predicted > 0, short when < 0
+    signal = np.sign(preds_arr)
+    strategy_returns = signal * actuals_arr
+    cum_strategy = np.cumsum(strategy_returns)
+    cum_buyhold = np.cumsum(actuals_arr)
+
+    detail_df = pd.DataFrame({
+        "date": X_test.index,
+        "predicted": preds_arr,
+        "actual": actuals_arr,
+        "signal": signal,
+        "strategy_return": strategy_returns,
+        "cum_strategy": cum_strategy,
+        "cum_buyhold": cum_buyhold,
+    })
+
+    importance = dict(zip(X_test.columns, model.feature_importances_))
+
+    return {
+        "detail": detail_df,
+        "metrics": {"mae": round(mae, 6), "rmse": round(rmse, 6),
+                    "directional_accuracy": round(da, 4), "ic": round(ic, 4)},
+        "importance": importance,
+        "train_size": len(X_train),
+        "test_size": len(X_test),
+    }
+
+
+def get_walkforward_detail(comparison_key: str, horizon_key: str,
+                           xgb_params: dict | None = None) -> pd.DataFrame:
+    """Return walk-forward prediction details for visualization."""
+    combined = get_combined_dataset()
+    feat_df = build_features(combined, comparison_key)
+    feature_cols = get_feature_columns(feat_df)
+    target_col = f"fwd_spread_{horizon_key}"
+
+    if target_col not in feat_df.columns:
+        return pd.DataFrame()
+
+    valid = feat_df[target_col].notna()
+    X = feat_df.loc[valid, feature_cols].copy()
+    y = feat_df.loc[valid, target_col].copy()
+
+    if len(X) < 30:
+        return pd.DataFrame()
+
+    return _walk_forward_detail(X, y, WF_N_SPLITS, WF_MIN_TRAIN_DAYS, xgb_params)
+
+
 def load_models() -> dict | None:
     """Load previously trained models from disk."""
     if MODEL_PATH.exists():

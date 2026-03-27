@@ -10,9 +10,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from config import FUND_TICKERS, COMPARISON_LABELS, HORIZON_LABELS
+from config import FUND_TICKERS, COMPARISON_LABELS, HORIZON_LABELS, XGBOOST_PARAMS
 from data_fetcher import clear_cache
-from model import train_all_models, load_models, get_predictions, get_historical_data
+from model import (
+    train_all_models, load_models, get_predictions, get_historical_data,
+    get_walkforward_detail, train_custom_split,
+)
 
 st.set_page_config(
     page_title="Investment XGBoost Predictions",
@@ -40,6 +43,53 @@ def get_model_store():
         _load_or_train_models.clear()
     return _load_or_train_models()
 
+
+# ---------------------------------------------------------------------------
+# Sidebar — Hyperparameter Tuning
+# ---------------------------------------------------------------------------
+
+with st.sidebar:
+    st.header("Model Settings")
+    st.caption("Adjust XGBoost hyperparameters. Changes apply to the Walk-Forward and Custom Split sections below (not the default predictions).")
+
+    use_custom_params = st.toggle("Use custom hyperparameters", value=False)
+
+    n_estimators = st.slider("n_estimators", 50, 1000, XGBOOST_PARAMS["n_estimators"], step=50)
+    max_depth = st.slider("max_depth", 2, 10, XGBOOST_PARAMS["max_depth"])
+    learning_rate = st.select_slider(
+        "learning_rate",
+        options=[0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2],
+        value=XGBOOST_PARAMS["learning_rate"],
+    )
+    subsample = st.slider("subsample", 0.5, 1.0, XGBOOST_PARAMS["subsample"], step=0.05)
+    colsample_bytree = st.slider("colsample_bytree", 0.5, 1.0, XGBOOST_PARAMS["colsample_bytree"], step=0.05)
+    reg_alpha = st.select_slider(
+        "reg_alpha (L1)",
+        options=[0.0, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
+        value=XGBOOST_PARAMS["reg_alpha"],
+    )
+    reg_lambda = st.select_slider(
+        "reg_lambda (L2)",
+        options=[0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
+        value=XGBOOST_PARAMS["reg_lambda"],
+    )
+    min_child_weight = st.slider("min_child_weight", 1, 50, XGBOOST_PARAMS["min_child_weight"])
+
+    if use_custom_params:
+        custom_params = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "learning_rate": learning_rate,
+            "subsample": subsample,
+            "colsample_bytree": colsample_bytree,
+            "reg_alpha": reg_alpha,
+            "reg_lambda": reg_lambda,
+            "min_child_weight": min_child_weight,
+            "objective": "reg:squarederror",
+            "random_state": 42,
+        }
+    else:
+        custom_params = None
 
 # ---------------------------------------------------------------------------
 # Header
@@ -180,3 +230,110 @@ if metrics_rows:
         subset=["Dir. Accuracy"],
     )
     st.dataframe(styled, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------------------------
+# Walk-Forward Visualization
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Walk-Forward Out-of-Sample Results")
+st.caption("Predicted vs actual spread returns from walk-forward validation. "
+           "Toggle custom hyperparameters in the sidebar to see how they change results.")
+
+wf_col1, wf_col2 = st.columns(2)
+with wf_col1:
+    wf_comp = st.selectbox(
+        "Comparison",
+        list(FUND_TICKERS.keys()),
+        format_func=lambda k: COMPARISON_LABELS[k],
+        key="wf_comp",
+    )
+with wf_col2:
+    wf_horizon = st.selectbox("Horizon", ["1m", "3m", "6m", "12m"], index=2, key="wf_horizon")
+
+with st.spinner("Running walk-forward validation..."):
+    wf_detail = get_walkforward_detail(wf_comp, wf_horizon, custom_params)
+
+if not wf_detail.empty:
+    wf_chart = wf_detail.set_index("date")[["predicted", "actual"]]
+    st.line_chart(wf_chart, height=350)
+
+    # Show walk-forward metrics
+    wf_preds = wf_detail["predicted"].values
+    wf_actuals = wf_detail["actual"].values
+    wf_da = float(np.mean(np.sign(wf_preds) == np.sign(wf_actuals)))
+    wf_mae = float(np.mean(np.abs(wf_preds - wf_actuals)))
+
+    wf_m1, wf_m2, wf_m3 = st.columns(3)
+    wf_m1.metric("Samples", len(wf_detail))
+    wf_m2.metric("Dir. Accuracy", f"{wf_da:.1%}")
+    wf_m3.metric("MAE", f"{wf_mae:.4f}")
+else:
+    st.info("Not enough data for walk-forward validation on this combination.")
+
+# ---------------------------------------------------------------------------
+# Custom Train/Test Split
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Custom Train/Test Split")
+st.caption("Choose a cutoff date: the model trains on data before it and tests on data after. "
+           "See out-of-sample predictions, strategy P&L, and metrics.")
+
+cs_col1, cs_col2, cs_col3 = st.columns(3)
+with cs_col1:
+    cs_comp = st.selectbox(
+        "Comparison",
+        list(FUND_TICKERS.keys()),
+        format_func=lambda k: COMPARISON_LABELS[k],
+        key="cs_comp",
+    )
+with cs_col2:
+    cs_horizon = st.selectbox("Horizon", ["1m", "3m", "6m", "12m"], index=2, key="cs_horizon")
+with cs_col3:
+    cs_cutoff = st.date_input(
+        "Training cutoff date",
+        value=pd.Timestamp("2020-01-01"),
+        min_value=pd.Timestamp("2010-01-01"),
+        max_value=pd.Timestamp("2025-06-01"),
+        key="cs_cutoff",
+    )
+
+if st.button("Run Custom Split", type="primary", key="run_custom_split"):
+    with st.spinner("Training model with custom split..."):
+        cs_result = train_custom_split(cs_comp, cs_horizon, str(cs_cutoff), custom_params)
+
+    if "error" in cs_result:
+        st.error(cs_result["error"])
+    else:
+        detail = cs_result["detail"]
+        metrics = cs_result["metrics"]
+
+        # Metrics row
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Train Size", cs_result["train_size"])
+        m2.metric("Test Size", cs_result["test_size"])
+        m3.metric("Dir. Accuracy", f"{metrics['directional_accuracy']:.1%}")
+        m4.metric("MAE", f"{metrics['mae']:.4f}")
+        m5.metric("IC", f"{metrics['ic']:.3f}")
+
+        # Predicted vs Actual chart
+        st.markdown("**Predicted vs Actual Spread Returns**")
+        pred_chart = detail.set_index("date")[["predicted", "actual"]]
+        st.line_chart(pred_chart, height=300)
+
+        # Cumulative Strategy P&L
+        st.markdown("**Cumulative Returns: Model Signal vs Buy & Hold Spread**")
+        pnl_chart = detail.set_index("date")[["cum_strategy", "cum_buyhold"]].rename(
+            columns={"cum_strategy": "Model Signal", "cum_buyhold": "Buy & Hold Spread"}
+        )
+        st.line_chart(pnl_chart, height=300)
+
+        # Strategy summary
+        total_strat = float(detail["cum_strategy"].iloc[-1])
+        total_bh = float(detail["cum_buyhold"].iloc[-1])
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Model Signal Total Return", f"{total_strat:.2%}")
+        s2.metric("Buy & Hold Spread Total Return", f"{total_bh:.2%}")
+        s3.metric("Excess Return", f"{total_strat - total_bh:.2%}",
+                  delta=f"{total_strat - total_bh:+.2%}")
