@@ -251,8 +251,12 @@ with wf_col1:
 with wf_col2:
     wf_horizon = st.selectbox("Horizon", ["1m", "3m", "6m", "12m"], index=2, key="wf_horizon")
 
-with st.spinner("Running walk-forward validation..."):
-    wf_detail = get_walkforward_detail(wf_comp, wf_horizon, custom_params)
+if st.button("Run Walk-Forward", type="primary", key="run_wf"):
+    with st.spinner("Running walk-forward validation..."):
+        st.session_state["wf_detail"] = get_walkforward_detail(wf_comp, wf_horizon, custom_params)
+        st.session_state["wf_detail_key"] = (wf_comp, wf_horizon)
+
+wf_detail = st.session_state.get("wf_detail", pd.DataFrame())
 
 if not wf_detail.empty:
     wf_chart = wf_detail.set_index("date")[["predicted", "actual"]]
@@ -269,7 +273,7 @@ if not wf_detail.empty:
     wf_m2.metric("Dir. Accuracy", f"{wf_da:.1%}")
     wf_m3.metric("MAE", f"{wf_mae:.4f}")
 else:
-    st.info("Not enough data for walk-forward validation on this combination.")
+    st.info("Click 'Run Walk-Forward' to run out-of-sample validation.")
 
 # ---------------------------------------------------------------------------
 # Custom Train/Test Split
