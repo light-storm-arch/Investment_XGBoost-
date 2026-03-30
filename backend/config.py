@@ -54,6 +54,7 @@ XGBOOST_PARAMS = {
     "min_child_weight": 10,
     "objective": "reg:squarederror",
     "random_state": 42,
+    "n_jobs": -1,
 }
 
 # Walk-forward validation settings

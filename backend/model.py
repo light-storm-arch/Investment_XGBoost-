@@ -298,7 +298,7 @@ def train_custom_split(comparison_key: str, horizon_key: str, cutoff_date: str,
         "cum_buyhold": cum_buyhold,
     })
 
-    importance = dict(zip(X_test.columns, model.feature_importances_))
+    importance = dict(zip(X_train.columns, model.feature_importances_))
 
     return {
         "detail": detail_df,
