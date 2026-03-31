@@ -91,6 +91,7 @@ with st.sidebar:
             "min_child_weight": min_child_weight,
             "objective": "reg:squarederror",
             "random_state": 42,
+            "early_stopping_rounds": 30,
         }
     else:
         custom_params = None

@@ -55,6 +55,7 @@ XGBOOST_PARAMS = {
     "objective": "reg:squarederror",
     "random_state": 42,
     "n_jobs": -1,
+    "early_stopping_rounds": 30,
 }
 
 # Walk-forward validation settings
