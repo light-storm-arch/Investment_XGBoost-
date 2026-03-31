@@ -78,7 +78,6 @@ def _walk_forward_validate(X: pd.DataFrame, y: pd.Series, n_splits: int, min_tra
             X_tr, y_tr,
             eval_set=[(X_val, y_val)],
             verbose=False,
-            early_stopping_rounds=30,
         )
 
         preds = model.predict(X_test)
@@ -179,7 +178,6 @@ def train_all_models(force_refresh: bool = False) -> dict:
                 X_tr, y_tr,
                 eval_set=[(X_val, y_val)],
                 verbose=False,
-                early_stopping_rounds=30,
             )
 
             importance = dict(zip(X.columns, final_model.feature_importances_))
@@ -227,7 +225,7 @@ def _walk_forward_detail(X: pd.DataFrame, y: pd.Series, n_splits: int,
 
         X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, test_size=0.2, shuffle=False)
         model = XGBRegressor(**params)
-        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False, early_stopping_rounds=30)
+        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
 
         preds = model.predict(X_test)
         for date, pred, actual in zip(X_test.index, preds, y_test.values):
@@ -270,7 +268,7 @@ def train_custom_split(comparison_key: str, horizon_key: str, cutoff_date: str,
     y_tr, y_val = y_train.iloc[:split_idx], y_train.iloc[split_idx:]
 
     model = XGBRegressor(**params)
-    model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False, early_stopping_rounds=30)
+    model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
 
     preds = model.predict(X_test)
     preds_arr = np.array(preds)
