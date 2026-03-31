@@ -55,6 +55,10 @@ with st.sidebar:
     use_custom_params = st.toggle("Use custom hyperparameters", value=False)
 
     n_estimators = st.slider("n_estimators", 50, 1000, XGBOOST_PARAMS["n_estimators"], step=50)
+    st.caption(
+        "Early stopping is active (30 rounds). Training halts once validation loss "
+        "stops improving — effective tree count may be lower than n_estimators."
+    )
     max_depth = st.slider("max_depth", 2, 10, XGBOOST_PARAMS["max_depth"])
     learning_rate = st.select_slider(
         "learning_rate",
