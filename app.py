@@ -6,6 +6,9 @@ from pathlib import Path
 # Add backend to path so imports work
 sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
+import logging
+import traceback
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -118,6 +121,7 @@ try:
     store = get_model_store()
     results = get_predictions(store)
 except Exception as e:
+    logging.error(traceback.format_exc())
     st.error(f"Failed to load models or generate predictions: {e}")
     st.stop()
 
