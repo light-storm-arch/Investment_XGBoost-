@@ -95,6 +95,7 @@ with st.sidebar:
             "objective": "reg:squarederror",
             "random_state": 42,
             "early_stopping_rounds": 30,
+            "eval_metric": "rmse",
         }
     else:
         custom_params = None
