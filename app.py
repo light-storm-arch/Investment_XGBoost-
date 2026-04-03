@@ -63,24 +63,52 @@ with st.sidebar:
         "stops improving — effective tree count may be lower than n_estimators."
     )
     max_depth = st.slider("max_depth", 2, 10, XGBOOST_PARAMS["max_depth"])
+    st.caption(
+        "Controls tree complexity. Higher = more complex patterns but higher "
+        "overfitting risk. Lower = simpler, more generalizable model."
+    )
     learning_rate = st.select_slider(
         "learning_rate",
         options=[0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2],
         value=XGBOOST_PARAMS["learning_rate"],
     )
+    st.caption(
+        "Step size per boosting round. Lower = more rounds needed but often "
+        "better generalization. Higher = faster training but may overshoot."
+    )
     subsample = st.slider("subsample", 0.5, 1.0, XGBOOST_PARAMS["subsample"], step=0.05)
+    st.caption(
+        "Fraction of training rows used per tree. Lower adds randomness that "
+        "can reduce overfitting. 1.0 uses all rows."
+    )
     colsample_bytree = st.slider("colsample_bytree", 0.5, 1.0, XGBOOST_PARAMS["colsample_bytree"], step=0.05)
+    st.caption(
+        "Fraction of features considered per tree. Lower forces the model to "
+        "learn from different feature subsets, reducing overfitting."
+    )
     reg_alpha = st.select_slider(
         "reg_alpha (L1)",
         options=[0.0, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
         value=XGBOOST_PARAMS["reg_alpha"],
+    )
+    st.caption(
+        "L1 regularization — pushes unimportant feature weights to zero. "
+        "Higher = sparser model, acts as feature selection."
     )
     reg_lambda = st.select_slider(
         "reg_lambda (L2)",
         options=[0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
         value=XGBOOST_PARAMS["reg_lambda"],
     )
+    st.caption(
+        "L2 regularization — penalizes large weights. Higher = smoother "
+        "predictions and less overfitting."
+    )
     min_child_weight = st.slider("min_child_weight", 1, 50, XGBOOST_PARAMS["min_child_weight"])
+    st.caption(
+        "Minimum data weight in a leaf node. Higher = more conservative splits, "
+        "prevents the model from learning noise in small samples."
+    )
 
     if use_custom_params:
         custom_params = {
@@ -363,3 +391,85 @@ if st.button("Run Custom Split", type="primary", key="run_custom_split"):
         s2.metric("Buy & Hold Spread Total Return", f"{total_bh:.2%}")
         s3.metric("Excess Return", f"{total_strat - total_bh:.2%}",
                   delta=f"{total_strat - total_bh:+.2%}")
+
+# ---------------------------------------------------------------------------
+# Methodology
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Methodology")
+
+with st.expander("Price-Based Features"):
+    st.markdown("""
+These features capture the relative momentum, volatility, and drawdown characteristics
+of each fund pair. All are computed from monthly adjusted close prices.
+
+| Feature | Description |
+|---|---|
+| **spread_ret_1m / 3m / 6m / 12m** | Cumulative return spread (long minus short) over 1, 3, 6, and 12 months. Captures trend at multiple time scales. |
+| **spread_momentum_3v12** | Short-term vs long-term momentum (3-month spread minus 12-month spread). Positive values suggest recent acceleration in the long fund's favor. |
+| **long_ret_1m / short_ret_1m** | Individual fund 1-month returns. Provides the model with absolute performance context beyond the spread. |
+| **long_vol_6m / short_vol_6m** | 6-month rolling standard deviation of monthly returns for each fund. Measures recent realized volatility. |
+| **relative_vol** | Ratio of long fund volatility to short fund volatility. Values above 1.0 indicate the long fund is more volatile. |
+| **long_drawdown / short_drawdown** | Current price relative to the 12-month rolling high, minus 1. Measures how far each fund has fallen from its recent peak. |
+""")
+
+with st.expander("Macroeconomic Features"):
+    st.markdown("""
+Macro features are sourced from the Federal Reserve Economic Data (FRED) API.
+Both the level and 3-month change are included so the model can distinguish
+between "rates are high" and "rates are rising."
+
+| Feature | FRED Series | Description |
+|---|---|---|
+| **treasury_10y / _chg_3m** | GS10 | 10-Year Treasury yield level and its 3-month change. Reflects long-term interest rate environment. |
+| **yield_spread / _chg_3m** | T10Y2Y | 2-to-10-year yield curve slope. Inversion (negative values) has historically preceded recessions. |
+| **cpi_yoy / _chg_3m** | CPIAUCSL | Year-over-year CPI inflation rate and its 3-month change. Captures the inflation regime. |
+| **unemployment / _chg_3m** | UNRATE | Unemployment rate and 3-month change. Rising unemployment signals economic weakness. |
+| **fed_funds / _chg_3m** | FEDFUNDS | Federal funds rate and 3-month change. Reflects monetary policy stance and direction. |
+| **credit_spread / _chg_3m** | BAA minus AAA | Corporate credit spread (BAA yield minus AAA yield). Widens during stress, narrows in risk-on environments. |
+| **gdp_yoy** | GDP | Year-over-year real GDP growth rate. Quarterly data forward-filled to monthly. |
+""")
+
+with st.expander("Model & Validation"):
+    st.markdown("""
+**Algorithm** — XGBoost gradient-boosted regression (`reg:squarederror`) predicts the
+forward cumulative spread return (long fund minus short fund) over 1, 3, 6, and
+12-month horizons. A separate model is trained for each comparison pair and horizon
+(8 models total).
+
+**Walk-Forward Validation** — Models are evaluated using an expanding-window walk-forward
+approach with 5 splits and a minimum training window of ~10 years (2,520 trading days).
+At each split the model trains on all data up to that point and predicts the next block.
+This avoids look-ahead bias and simulates real-time usage.
+
+**Early Stopping** — Each fit uses early stopping with a patience of 30 rounds, monitored
+on a held-out 20% validation set (most recent portion of the training window). Training
+halts once RMSE stops improving, so the effective number of trees is often lower than
+`n_estimators`.
+
+**Confidence Levels** — Predictions are assigned high, medium, or low confidence based on
+two factors: the model's historical directional accuracy (from walk-forward) and the
+z-score of the current prediction relative to the historical standard deviation of the
+target spread.
+
+**Magnitude Thresholds** — The absolute prediction value determines the recommended
+portfolio tilt:
+- < 1%: Negligible — equal weight / no tilt
+- 1–3%: Modest — slight overweight (~55/45)
+- 3–6%: Moderate — meaningful overweight (~65/35)
+- > 6%: Strong — significant overweight (~75/25)
+""")
+
+with st.expander("Data Sources"):
+    st.markdown("""
+| Source | Data | Tickers / Series |
+|---|---|---|
+| **Yahoo Finance** (via yfinance) | Monthly adjusted close prices | VTV (Value), VUG (Growth), VTI (US Total Market), VXUS (International) |
+| **FRED API** | Macroeconomic indicators | GS10, T10Y2Y, CPIAUCSL, UNRATE, GDP, FEDFUNDS, BAA, AAA |
+
+All data is resampled to month-end frequency and history begins from **2004-01-01**
+(~20 years). Fund prices and macro data are joined on the common date index. A FRED API
+key is required — get a free one at
+[fred.stlouisfed.org/docs/api/api_key.html](https://fred.stlouisfed.org/docs/api/api_key.html).
+""")
