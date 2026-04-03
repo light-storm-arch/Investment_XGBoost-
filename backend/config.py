@@ -56,6 +56,7 @@ XGBOOST_PARAMS = {
     "random_state": 42,
     "n_jobs": -1,
     "early_stopping_rounds": 30,
+    "eval_metric": "rmse",
 }
 
 # Walk-forward validation settings
