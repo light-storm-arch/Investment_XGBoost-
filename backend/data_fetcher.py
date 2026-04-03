@@ -65,7 +65,12 @@ def fetch_fund_prices() -> pd.DataFrame:
     series = {}
     for ticker in ALL_TICKERS:
         logger.info(f"Downloading {ticker}")
-        series[ticker] = _download_single_ticker(ticker)
+        try:
+            series[ticker] = _download_single_ticker(ticker)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to fetch price data for {ticker} from Yahoo Finance: {e}"
+            ) from e
         time.sleep(1)  # brief pause between tickers to avoid rate limits
 
     prices = pd.DataFrame(series)
@@ -94,15 +99,34 @@ def fetch_fred_data() -> pd.DataFrame:
         except Exception:
             pass
     if not api_key:
-        raise RuntimeError("FRED_API_KEY is not set. Set it in .env, environment, or Streamlit secrets.")
+        raise RuntimeError("FRED_API_KEY is not set. Set it in .env, environment, or Streamlit secrets. "
+                           "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html")
+    if api_key == "your_fred_api_key_here":
+        raise RuntimeError("FRED_API_KEY is set to the placeholder value from .env.example. "
+                           "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html")
 
     fred = Fred(api_key=api_key)
     series_dict: dict[str, pd.Series] = {}
 
     for name, series_id in FRED_SERIES.items():
         logger.info(f"Fetching FRED series: {series_id}")
-        s = fred.get_series(series_id, observation_start=DATA_START_DATE)
-        series_dict[name] = s
+        last_err = None
+        for attempt in range(3):
+            try:
+                s = fred.get_series(series_id, observation_start=DATA_START_DATE)
+                series_dict[name] = s
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(f"Retry {attempt + 1}/3 for FRED {series_id} after {wait}s: {e}")
+                    time.sleep(wait)
+        else:
+            raise RuntimeError(
+                f"FRED API error fetching '{series_id}' ({name}) after 3 attempts: {last_err}. "
+                f"Check that your FRED_API_KEY is valid."
+            ) from last_err
 
     df = pd.DataFrame(series_dict)
     df.index = pd.to_datetime(df.index)
