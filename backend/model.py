@@ -335,13 +335,24 @@ def load_models() -> dict | None:
     """Load previously trained models from disk."""
     if MODEL_PATH.exists():
         logger.info("Loading models from disk")
-        return joblib.load(MODEL_PATH)
+        try:
+            return joblib.load(MODEL_PATH)
+        except Exception as e:
+            logger.warning(f"Failed to load saved models (will retrain): {e}")
+            try:
+                MODEL_PATH.unlink()
+            except OSError:
+                pass
+            return None
     return None
 
 
 def get_predictions(store: dict) -> list[ModelResult]:
     """Generate predictions for all models using the latest available features."""
-    combined = get_combined_dataset()
+    try:
+        combined = get_combined_dataset()
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch latest data for predictions: {e}") from e
     results = []
 
     for (comp_key, horizon_key), entry in store.items():

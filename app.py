@@ -123,7 +123,19 @@ try:
     results = get_predictions(store)
 except Exception as e:
     logging.error(traceback.format_exc())
-    st.error(f"Failed to load models or generate predictions: {e}")
+    error_msg = str(e)
+    if "FRED_API_KEY" in error_msg:
+        st.error(f"FRED API key issue: {error_msg}")
+        st.info("Set FRED_API_KEY in a `.env` file or as an environment variable. "
+                "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html")
+    elif "Yahoo Finance" in error_msg or "yfinance" in error_msg.lower():
+        st.error(f"Data download issue: {error_msg}")
+        st.info("Yahoo Finance may be temporarily unavailable. Try again in a few minutes.")
+    elif "FRED API error" in error_msg:
+        st.error(f"FRED data issue: {error_msg}")
+        st.info("The FRED API may be temporarily unavailable, or your API key may be invalid.")
+    else:
+        st.error(f"Failed to load models or generate predictions: {type(e).__name__}: {e}")
     st.stop()
 
 # ---------------------------------------------------------------------------
