@@ -387,6 +387,52 @@ def get_predictions(store: dict) -> list[ModelResult]:
     return results
 
 
+def get_shap_explanation(
+    store: dict, comp_key: str, horizon_key: str
+) -> list[tuple[str, float]]:
+    """Compute SHAP values for the latest prediction row.
+
+    Uses XGBoost's TreeExplainer (fast, exact — no sampling needed).
+
+    Args:
+        store: Model store dict from train_all_models() or load_models().
+        comp_key: Comparison key, e.g. 'value_growth'.
+        horizon_key: Horizon key, e.g. '3m'.
+
+    Returns:
+        List of (feature_name, shap_value) tuples, sorted by |shap_value| descending.
+        Returns an empty list if the model is not found or data is unavailable.
+    """
+    import shap as shap_lib
+
+    key = (comp_key, horizon_key)
+    if key not in store:
+        logger.warning(f"No model found for {comp_key}/{horizon_key}")
+        return []
+
+    entry = store[key]
+    model = entry["model"]
+    feature_cols = entry["feature_cols"]
+
+    try:
+        combined = get_combined_dataset()
+        feat_df = build_features(combined, comp_key)
+        complete = feat_df[feature_cols].dropna()
+        if complete.empty:
+            return []
+        X_latest = complete.iloc[[-1]]
+    except Exception as e:
+        logger.warning(f"Failed to build features for SHAP explanation: {e}")
+        return []
+
+    explainer = shap_lib.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_latest)
+    # shap_values shape: (1, n_features)
+    pairs = list(zip(feature_cols, shap_values[0]))
+    pairs.sort(key=lambda x: abs(x[1]), reverse=True)
+    return pairs
+
+
 def get_historical_data(comparison_key: str) -> dict:
     """Return historical performance data for the frontend chart."""
     combined = get_combined_dataset()

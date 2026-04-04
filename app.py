@@ -14,11 +14,12 @@ import pandas as pd
 import numpy as np
 
 from config import FUND_TICKERS, COMPARISON_LABELS, HORIZON_LABELS, XGBOOST_PARAMS
-from data_fetcher import clear_cache
+from data_fetcher import clear_cache, get_combined_dataset
 from model import (
     train_all_models, load_models, get_predictions, get_historical_data,
-    get_walkforward_detail, train_custom_split,
+    get_walkforward_detail, train_custom_split, get_shap_explanation,
 )
+from regime_detector import get_current_regime
 
 st.set_page_config(
     page_title="Investment XGBoost Predictions",
@@ -149,6 +150,8 @@ with col_btn:
 try:
     store = get_model_store()
     results = get_predictions(store)
+    combined = get_combined_dataset()
+    regime = get_current_regime(combined)
 except Exception as e:
     logging.error(traceback.format_exc())
     error_msg = str(e)
@@ -184,6 +187,27 @@ def _render_comparison(comp_key: str):
     if not preds:
         st.warning(f"No predictions available for {label}. Model training may have failed — check logs.")
         return
+
+    # ── Regime context ────────────────────────────────────────────────────────
+    note_key = "value_growth_note" if comp_key == "value_growth" else "us_intl_note"
+    if regime:
+        with st.expander("Current Macro Regime Context", expanded=False):
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            regime_cols = [
+                (rc1, "rates", "Rate Environment"),
+                (rc2, "yield_curve", "Yield Curve"),
+                (rc3, "credit", "Credit Conditions"),
+                (rc4, "inflation", "Inflation"),
+            ]
+            for col, dim_key, dim_label in regime_cols:
+                dim = regime.get(dim_key)
+                if dim:
+                    color = dim["color"]
+                    with col:
+                        st.markdown(f"**{dim_label}**")
+                        st.markdown(f":{color}[{dim['label']}]")
+                        st.caption(dim["detail"])
+                        st.caption(f"*{dim.get(note_key, '')}*")
 
     cols = st.columns(len(preds))
     for col, p in zip(cols, preds):
@@ -246,6 +270,59 @@ if fi_key in store:
     st.bar_chart(fi_df.set_index("feature"), horizontal=True, height=400)
 else:
     st.info("No model available for this combination.")
+
+# ---------------------------------------------------------------------------
+# Prediction Drivers (SHAP)
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("Prediction Drivers (SHAP)")
+st.caption(
+    "SHAP values show why the current prediction is what it is — each feature's "
+    "contribution to today's forecast. Positive values push the prediction higher "
+    "(favoring the long fund); negative values push it lower."
+)
+
+shap_col1, shap_col2 = st.columns(2)
+with shap_col1:
+    shap_comp = st.selectbox(
+        "Comparison",
+        list(FUND_TICKERS.keys()),
+        format_func=lambda k: COMPARISON_LABELS[k],
+        key="shap_comp",
+    )
+with shap_col2:
+    shap_horizon = st.selectbox("Horizon", ["1m", "3m", "6m", "12m"], index=2, key="shap_horizon")
+
+if st.button("Explain Current Prediction", type="primary", key="run_shap"):
+    with st.spinner("Computing SHAP values..."):
+        shap_pairs = get_shap_explanation(store, shap_comp, shap_horizon)
+        st.session_state["shap_pairs"] = shap_pairs
+        st.session_state["shap_label"] = (shap_comp, shap_horizon)
+
+shap_pairs = st.session_state.get("shap_pairs", [])
+shap_label = st.session_state.get("shap_label")
+
+if shap_pairs:
+    # Top 3 plain-English summary
+    top3 = shap_pairs[:3]
+    pair_cfg = FUND_TICKERS[shap_label[0]]
+    long_name = pair_cfg["a_label"].split("(")[0].strip()
+    short_name = pair_cfg["b_label"].split("(")[0].strip()
+
+    parts = []
+    for feat, val in top3:
+        direction = f"favors {long_name}" if val > 0 else f"favors {short_name}"
+        parts.append(f"**{feat}** ({val:+.3f}, {direction})")
+    st.info("Top drivers: " + " · ".join(parts))
+
+    # Horizontal bar chart — negative bars go left, positive go right
+    top15 = shap_pairs[:15]
+    shap_df = pd.DataFrame(top15, columns=["Feature", "SHAP Value"])
+    shap_df = shap_df.sort_values("SHAP Value")  # ascending so chart reads top-to-bottom
+    st.bar_chart(shap_df.set_index("Feature"), horizontal=True, height=420)
+elif shap_label is not None:
+    st.info("No SHAP values available for this model.")
 
 # ---------------------------------------------------------------------------
 # Model metrics table
@@ -429,6 +506,41 @@ between "rates are high" and "rates are rising."
 | **fed_funds / _chg_3m** | FEDFUNDS | Federal funds rate and 3-month change. Reflects monetary policy stance and direction. |
 | **credit_spread / _chg_3m** | BAA minus AAA | Corporate credit spread (BAA yield minus AAA yield). Widens during stress, narrows in risk-on environments. |
 | **gdp_yoy** | GDP | Year-over-year real GDP growth rate. Quarterly data forward-filled to monthly. |
+""")
+
+with st.expander("Regime Detection"):
+    st.markdown("""
+The **Macro Regime Context** panel (shown above each comparison) classifies the current
+environment across four dimensions using the latest FRED data point:
+
+| Dimension | Source | Regime labels |
+|---|---|---|
+| **Rate Environment** | FEDFUNDS (3-month change) | Rising (>+0.25%), Falling (<-0.25%), Neutral |
+| **Yield Curve** | T10Y2Y | Inverted (<0%), Flat (0–0.5%), Normal (>0.5%) |
+| **Credit Conditions** | BAA minus AAA | Stressed (>1.5%), Benign |
+| **Inflation** | CPI YoY | High (>4%), Moderate (2–4%), Low (<2%) |
+
+Each label includes a note on how that regime has historically affected the specific
+comparison. These are heuristics based on well-documented macro relationships — not
+model outputs — and should be used as qualitative context alongside the predictions.
+""")
+
+with st.expander("SHAP Prediction Drivers"):
+    st.markdown("""
+The **Prediction Drivers** section uses SHAP (SHapley Additive exPlanations) to explain
+*why* the model produced a specific prediction for the current date.
+
+**How it works** — XGBoost's `TreeExplainer` computes exact SHAP values by decomposing
+the prediction into each feature's marginal contribution. Unlike global feature importance
+(which averages across all training samples), SHAP values are specific to the current
+input row.
+
+**Reading the chart** — Each bar represents one feature's contribution:
+- **Positive values** push the forecast higher (favoring the long fund)
+- **Negative values** push the forecast lower (favoring the short fund)
+- The sum of all SHAP values equals the prediction minus the model's baseline
+
+Features are ranked by absolute SHAP value so the most influential drivers appear at the top.
 """)
 
 with st.expander("Model & Validation"):
