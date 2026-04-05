@@ -32,7 +32,9 @@ def build_features(df: pd.DataFrame, comparison_key: str) -> pd.DataFrame:
     result["spread_ret_3m"] = spread_ret.rolling(3).sum()
     result["spread_ret_6m"] = spread_ret.rolling(6).sum()
     result["spread_ret_12m"] = spread_ret.rolling(12).sum()
+    result["spread_ret_24m"] = spread_ret.rolling(24).sum()
     result["spread_momentum_3v12"] = result["spread_ret_3m"] - result["spread_ret_12m"]
+    result["spread_momentum_6v24"] = result["spread_ret_6m"] - result["spread_ret_24m"]
 
     result["long_ret_1m"] = long_ret
     result["short_ret_1m"] = short_ret
@@ -74,6 +76,37 @@ def build_features(df: pd.DataFrame, comparison_key: str) -> pd.DataFrame:
 
     if "gdp_yoy" in df.columns:
         result["gdp_yoy"] = df["gdp_yoy"]
+
+    if "yield_spread_3m_10y" in df.columns:
+        result["yield_spread_3_10"] = df["yield_spread_3m_10y"]
+        result["yield_spread_3_10_chg_3m"] = df["yield_spread_3m_10y"].diff(3)
+
+    if "consumer_sentiment" in df.columns:
+        result["consumer_sentiment"] = df["consumer_sentiment"]
+        result["consumer_sentiment_chg_3m"] = df["consumer_sentiment"].diff(3)
+
+    if "indpro_yoy" in df.columns:
+        result["indpro_yoy"] = df["indpro_yoy"]
+        result["indpro_chg_3m"] = df["indpro_yoy"].diff(3)
+
+    if "retail_sales_yoy" in df.columns:
+        result["retail_sales_yoy"] = df["retail_sales_yoy"]
+        result["retail_sales_chg_3m"] = df["retail_sales_yoy"].diff(3)
+
+    # --- Auxiliary market features (VIX, USD index, Gold) ---
+    if "vix" in df.columns:
+        result["vix"] = df["vix"]
+        result["vix_chg_3m"] = df["vix"].diff(3)
+
+    if "usd_index" in df.columns:
+        result["usd_index"] = df["usd_index"]
+        result["usd_ret_3m"] = df["usd_index"].pct_change(3) * 100
+
+    if "gld" in df.columns:
+        result["gold_ret_3m"] = df["gld"].pct_change(3) * 100
+
+    # --- Calendar feature ---
+    result["month"] = result.index.month
 
     # --- Target variables: forward cumulative spread returns ---
     for horizon_months, label in [(1, "1m"), (3, "3m"), (6, "6m"), (12, "12m")]:

@@ -7,6 +7,13 @@ FUND_TICKERS = {
 
 ALL_TICKERS = ["VTV", "VUG", "VTI", "VXUS"]
 
+# Auxiliary market tickers (VIX, US Dollar index, Gold)
+AUX_TICKERS = {
+    "^VIX": "vix",
+    "DX-Y.NYB": "usd_index",
+    "GLD": "gld",
+}
+
 COMPARISON_LABELS = {
     "value_growth": "Value vs Growth",
     "us_intl": "US vs International",
@@ -16,12 +23,16 @@ COMPARISON_LABELS = {
 FRED_SERIES = {
     "treasury_10y": "GS10",
     "yield_spread_2_10": "T10Y2Y",
+    "yield_spread_3m_10y": "T10Y3M",       # 3m-to-10Y spread (more sensitive inversion signal)
     "cpi": "CPIAUCSL",
     "unemployment": "UNRATE",
     "gdp": "GDP",
     "fed_funds": "FEDFUNDS",
     "baa_yield": "BAA",
     "aaa_yield": "AAA",
+    "consumer_sentiment": "UMCSENT",        # Univ. of Michigan Consumer Sentiment
+    "indpro": "INDPRO",                     # Industrial Production index
+    "retail_sales": "RSAFS",               # Advance Retail Sales (seasonally adjusted)
 }
 
 # Prediction horizons in trading days

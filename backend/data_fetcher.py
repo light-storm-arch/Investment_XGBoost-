@@ -12,7 +12,7 @@ import yfinance as yf
 from dotenv import load_dotenv
 from fredapi import Fred
 
-from config import ALL_TICKERS, FRED_SERIES, DATA_START_DATE
+from config import ALL_TICKERS, AUX_TICKERS, FRED_SERIES, DATA_START_DATE
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -83,6 +83,34 @@ def fetch_fund_prices() -> pd.DataFrame:
     return monthly
 
 
+def fetch_aux_prices() -> pd.DataFrame:
+    """Download auxiliary market data (VIX, USD index, Gold), resampled to month-end."""
+    cache = _cache_path("aux_prices")
+    if _is_fresh(cache):
+        logger.info("Loading auxiliary prices from cache")
+        return pd.read_parquet(cache)
+
+    logger.info("Downloading auxiliary market data from yfinance")
+    series = {}
+    for ticker, col_name in AUX_TICKERS.items():
+        logger.info(f"Downloading {ticker}")
+        try:
+            series[col_name] = _download_single_ticker(ticker)
+        except Exception as e:
+            logger.warning(f"Could not fetch {ticker} ({col_name}): {e} — skipping")
+        time.sleep(1)
+
+    if not series:
+        return pd.DataFrame()
+
+    prices = pd.DataFrame(series)
+    monthly = prices.resample("ME").last()
+    monthly.dropna(how="all", inplace=True)
+
+    monthly.to_parquet(cache)
+    return monthly
+
+
 def fetch_fred_data() -> pd.DataFrame:
     """Download macro indicators from FRED, aligned to month-end frequency."""
     cache = _cache_path("fred_data")
@@ -141,7 +169,11 @@ def fetch_fred_data() -> pd.DataFrame:
     # Derived features
     df["cpi_yoy"] = df["cpi"].pct_change(12) * 100
     df["credit_spread"] = df["baa_yield"] - df["aaa_yield"]
-    df["gdp_yoy"] = df["gdp"].pct_change(4) * 100  # quarterly pct_change before ffill gives YoY
+    df["gdp_yoy"] = df["gdp"].pct_change(4) * 100
+    if "indpro" in df.columns:
+        df["indpro_yoy"] = df["indpro"].pct_change(12) * 100
+    if "retail_sales" in df.columns:
+        df["retail_sales_yoy"] = df["retail_sales"].pct_change(12) * 100
 
     df.to_parquet(cache)
     return df
@@ -155,8 +187,11 @@ def get_combined_dataset(force_refresh: bool = False) -> pd.DataFrame:
 
     prices = fetch_fund_prices()
     macro = fetch_fred_data()
+    aux = fetch_aux_prices()
 
     combined = prices.join(macro, how="inner")
+    if not aux.empty:
+        combined = combined.join(aux, how="left")
     combined.dropna(subset=ALL_TICKERS, inplace=True)
 
     _combined_cache = combined
