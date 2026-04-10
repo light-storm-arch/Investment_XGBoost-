@@ -1,5 +1,8 @@
 """Configuration constants for the Investment XGBoost app."""
 
+from datetime import timedelta
+from pathlib import Path
+
 FUND_TICKERS = {
     "value_growth": {"a": "VTV", "b": "VUG", "a_label": "Value (VTV)", "b_label": "Growth (VUG)"},
     "us_intl": {"a": "VTI", "b": "VXUS", "a_label": "US (VTI)", "b_label": "International (VXUS)"},
@@ -52,6 +55,17 @@ HORIZON_LABELS = {
 
 # Data start date (~20 years of history)
 DATA_START_DATE = "2004-01-01"
+
+# Snapshot data directory (bundled historical data for fast startup)
+SNAPSHOT_DIR = Path(__file__).parent / "data"
+
+# Cache TTL — prices change daily, macro data updates weekly/monthly
+CACHE_MAX_AGE_PRICES = timedelta(days=1)
+CACHE_MAX_AGE_MACRO = timedelta(days=7)
+
+# Horizons loaded on startup vs on demand
+DEFAULT_HORIZONS = ["3m", "6m"]
+EXTRA_HORIZONS = ["1m", "12m"]
 
 # XGBoost default hyperparameters
 XGBOOST_PARAMS = {

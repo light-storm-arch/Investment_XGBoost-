@@ -20,6 +20,9 @@ frontend/dist/
 # Cache
 backend/.cache/
 
+# Keep snapshot data files (used for fast startup)
+!backend/data/
+
 # IDE
 .vscode/
 .idea/

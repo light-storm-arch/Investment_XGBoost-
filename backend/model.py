@@ -143,18 +143,20 @@ def _prediction_to_recommendation(prediction: float, comparison_key: str, hist_s
     return recommendation, direction, magnitude
 
 
-def train_all_models(force_refresh: bool = False) -> dict:
-    """Train all 8 models (2 comparisons x 4 horizons). Returns model store dict."""
+def train_all_models(force_refresh: bool = False,
+                     horizons: list[str] | None = None) -> dict:
+    """Train models for specified horizons (defaults to all 4). Returns model store dict."""
     combined = get_combined_dataset(force_refresh=force_refresh)
     comparisons = list(FUND_TICKERS.keys())
     store = {}
+    horizons_to_train = horizons or HORIZON_KEYS
 
     for comp_key in comparisons:
         logger.info(f"Building features for {comp_key}")
         feat_df = build_features(combined, comp_key)
         feature_cols = get_feature_columns(feat_df)
 
-        for horizon_key in HORIZON_KEYS:
+        for horizon_key in horizons_to_train:
             target_col = f"fwd_spread_{horizon_key}"
             if target_col not in feat_df.columns:
                 continue

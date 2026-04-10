@@ -13,11 +13,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from config import FUND_TICKERS, COMPARISON_LABELS, HORIZON_LABELS, XGBOOST_PARAMS
+from config import (
+    FUND_TICKERS, COMPARISON_LABELS, HORIZON_LABELS, XGBOOST_PARAMS,
+    DEFAULT_HORIZONS, EXTRA_HORIZONS,
+)
 from data_fetcher import clear_cache, get_combined_dataset
 from model import (
     train_all_models, load_models, get_predictions, get_historical_data,
     get_walkforward_detail, train_custom_split, get_shap_explanation,
+    MODEL_PATH,
 )
 from regime_detector import get_current_regime
 
@@ -35,7 +39,7 @@ st.set_page_config(
 def _load_or_train_models():
     store = load_models()
     if store is None:
-        store = train_all_models()
+        store = train_all_models(horizons=DEFAULT_HORIZONS)
     return store
 
 
@@ -133,15 +137,17 @@ with st.sidebar:
 # Header
 # ---------------------------------------------------------------------------
 
-col_title, col_btn = st.columns([5, 1])
+col_title, col_btn1, col_btn2 = st.columns([5, 1, 1])
 with col_title:
     st.title("Investment Comparison")
     st.caption("XGBoost-powered fund pair predictions")
-with col_btn:
+with col_btn1:
     st.write("")  # spacer
     if st.button("Retrain Models", type="secondary"):
         st.session_state["force_retrain"] = True
         st.rerun()
+with col_btn2:
+    st.write("")  # spacer
 
 # ---------------------------------------------------------------------------
 # Load data
@@ -149,6 +155,19 @@ with col_btn:
 
 try:
     store = get_model_store()
+
+    # Check if extra horizons (1m, 12m) are available
+    _has_extras = any((c, h) in store for c in FUND_TICKERS for h in EXTRA_HORIZONS)
+    with col_btn2:
+        if not _has_extras:
+            if st.button("Load 1m & 12m", type="secondary"):
+                with st.spinner("Training 1-month and 12-month models..."):
+                    import joblib
+                    extra = train_all_models(horizons=EXTRA_HORIZONS)
+                    store.update(extra)
+                    joblib.dump(store, MODEL_PATH)
+                st.rerun()
+
     results = get_predictions(store)
     combined = get_combined_dataset()
     regime = get_current_regime(combined)
@@ -179,8 +198,9 @@ CONFIDENCE_COLORS = {"high": "green", "medium": "orange", "low": "gray"}
 def _render_comparison(comp_key: str):
     label = COMPARISON_LABELS[comp_key]
     pair = FUND_TICKERS[comp_key]
-    preds = [r for r in results if r.comparison == comp_key]
-    preds.sort(key=lambda r: ["1m", "3m", "6m", "12m"].index(r.horizon))
+    available_horizons = [h for h in ["1m", "3m", "6m", "12m"] if (comp_key, h) in store]
+    preds = [r for r in results if r.comparison == comp_key and r.horizon in available_horizons]
+    preds.sort(key=lambda r: available_horizons.index(r.horizon))
 
     st.subheader(f"{label} ({pair['a']} vs {pair['b']})")
 
@@ -248,6 +268,8 @@ for comp_key in FUND_TICKERS:
 
 st.subheader("Feature Importance")
 
+_available_horizons = sorted(set(h for _, h in store.keys()), key=["1m", "3m", "6m", "12m"].index)
+
 fi_col1, fi_col2 = st.columns(2)
 with fi_col1:
     fi_comp = st.selectbox(
@@ -257,7 +279,7 @@ with fi_col1:
         key="fi_comp",
     )
 with fi_col2:
-    fi_horizon = st.selectbox("Horizon", ["1m", "3m", "6m", "12m"], index=2, key="fi_horizon")
+    fi_horizon = st.selectbox("Horizon", _available_horizons, index=min(1, len(_available_horizons) - 1), key="fi_horizon")
 
 fi_key = (fi_comp, fi_horizon)
 if fi_key in store:
@@ -292,7 +314,7 @@ with shap_col1:
         key="shap_comp",
     )
 with shap_col2:
-    shap_horizon = st.selectbox("Horizon", ["1m", "3m", "6m", "12m"], index=2, key="shap_horizon")
+    shap_horizon = st.selectbox("Horizon", _available_horizons, index=min(1, len(_available_horizons) - 1), key="shap_horizon")
 
 if st.button("Explain Current Prediction", type="primary", key="run_shap"):
     with st.spinner("Computing SHAP values..."):
